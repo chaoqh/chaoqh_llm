@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Experimental Design — RNA-seq Data Analysis</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+<h1>RNA-seq Data Analysis</h1>
+<p class="subtitle">A hands-on introduction for graduate students in genomics</p>
+</header>
+<nav>
+<ul>
+<li><a href="index.html">Overview</a></li>
+<li><a href="experimental-design.html" class="active">Experimental Design</a></li>
+<li><a href="quality-control.html">Quality Control</a></li>
+<li><a href="alignment-quantification.html">Alignment &amp; Quantification</a></li>
+<li><a href="differential-expression.html">Differential Expression</a></li>
+<li><a href="functional-analysis.html">Functional Analysis</a></li>
+</ul>
+</nav>
+<main>
+<section>
+<h2>Experimental Design: The Foundation of Reliable RNA-seq</h2>
+<p>No amount of computational cleverness can rescue a poorly designed experiment. The decisions you make before sequencing — how many replicates, which controls, what sequencing depth — determine whether your differential expression results are trustworthy.</p>
+</section>
+
+<section>
+<h2>Biological vs. Technical Replicates</h2>
+<p>This is the single most important distinction in RNA-seq design.</p>
+<div class="concepts">
+<div class="concept">
+<h3>Biological Replicates</h3>
+<p>Independent samples from different biological units: different mice, different patients, different cell culture passages, different fields in an agricultural trial. They capture biological variation — the variation you care about when generalizing to a population. <strong>These are required for statistical inference.</strong></p>
+</div>
+<div class="concept">
+<h3>Technical Replicates</h3>
+<p>The same biological sample split and processed independently (e.g., same RNA library sequenced on two lanes). They capture technical variation from library prep and sequencing. <strong>These do not increase statistical power for biological conclusions.</strong> Pool technical replicates before analysis, or average them.</p>
+</div>
+</div>
+<p class="warning"><strong>Rule of thumb:</strong> Budget for biological replicates first. A typical minimum is <strong>3 biological replicates per condition</strong>; 5–6 is better for detecting modest fold changes. With fewer than 3, you cannot reliably estimate dispersion.</p>
+</section>
+
+<section>
+<h2>Choosing the Number of Replicates</h2>
+<p>The power to detect differential expression depends on:</p>
+<ul>
+<li><strong>Effect size:</strong> Larger fold changes need fewer replicates</li>
+<li><strong>Biological variability:</strong> High variability (e.g., human patients) needs more replicates than low variability (e.g., inbred mice)</li>
+<li><strong>Desired FDR and power:</strong> Standard is FDR ≤ 0.05, power ≥ 0.8</li>
+<li><strong>Sequencing depth:</strong> Deeper sequencing reduces sampling noise but not biological variance</li>
+</ul>
+<p>Tools like <code>RNASeqPower</code> (R), <code>PROPER</code>, or <code>Scotty</code> can simulate power for your design. For a typical mammalian cell line experiment with moderate variability, 3–4 replicates per condition gives ~80% power to detect 2-fold changes at FDR 5%. For human tissue studies, plan for 6+ replicates.</p>
+</section>
+
+<section>
+<h2>Controls and Conditions</h2>
+<ul>
+<li><strong>Untreated/vehicle control:</strong> Essential for any treatment experiment. Match the solvent (DMSO, ethanol) in treated samples.</li>
+<li><strong>Time course:</strong> Include multiple time points if the response is dynamic. Each time point needs its own replicates.</li>
+<li><strong>Dose response:</strong> At least 3 doses plus control, with replicates at each dose.</li>
+<li><strong>Batch-matched controls:</strong> If you must process samples in batches, distribute conditions evenly across batches.</li>
+</ul>
+</section>
+
+<section>
+<h2>Sequencing Depth</h2>
+<p>How many reads per sample? It depends on your goals:</p>
+<table>
+<thead>
+<tr><th>Application</th><th>Recommended Depth</th><th>Notes</th></tr>
+</thead>
+<tbody>
+<tr><td>Standard differential expression (mammalian)</td><td>20–30 million paired-end reads</td><td>Sufficient for most protein-coding genes</td></tr>
+<tr><td>Low-expression genes, non-coding RNA</td><td>50–100 million reads</td><td>Deeper sequencing captures rare transcripts</td></tr>
+<tr><td>Alternative splicing analysis</td><td>50–100 million paired-end reads</td><td>Longer reads (150 bp) help resolve isoforms</td></tr>
+<tr><td>Single-cell RNA-seq</td><td>50,000–100,000 reads/cell</td><td>Depends on cell type complexity</td></tr>
+<tr><td>Bacterial/yeast (smaller genomes)</td><td>10–20 million reads</td><td>Less complexity, fewer reads needed</td></tr>
+</tbody>
+</table>
+<p><strong>Paired-end reads (2 × 75 bp or 2 × 150 bp)</strong> are strongly recommended over single-end for splice-aware alignment and isoform resolution. The cost difference is modest; the information gain is substantial.</p>
+</section>
+
+<section>
+<h2>Blocking and Randomization</h2>
+<p>Batch effects are a major confounder in RNA-seq. Sources include:</p>
+<ul>
+<li>Library preparation date/technician</li>
+<li>Sequencing lane/run</li>
+<li>RNA extraction date</li>
+<li>Flow cell</li>
+</ul>
+<p><strong>Design strategy:</strong> Randomize samples across batches. If you have 6 control and 6 treated samples processed in 2 library prep batches, put 3 control + 3 treated in each batch. This lets you model batch as a covariate in DESeq2 (<code>~ batch + condition</code>).</p>
+<p>If randomization is impossible (e.g., all controls processed before all treatments), you cannot computationally separate batch from condition — the design is confounded.</p>
+</section>
+
+<section>
+<h2>Strandedness</h2>
+<p>Stranded libraries preserve the strand of origin, which:</p>
+<ul>
+<li>Resolves overlapping genes on opposite strands</li>
+<li>Improves quantification accuracy for antisense transcripts</li>
+<li>Is essential for certain library prep kits (dUTP-based)</li>
+</ul>
+<p>Know your library prep protocol. Common types: <strong>forward-stranded</strong> (read 1 = sense strand), <strong>reverse-stranded</strong> (read 1 = antisense), <strong>unstranded</strong>. Tell your quantifier (featureCounts, Salmon) the correct setting.</p>
+</section>
+
+<section>
+<h2>RNA Quality: RIN and DV200</h2>
+<ul>
+<li><strong>RIN (RNA Integrity Number):</strong> 1–10 scale from Bioanalyzer/TapeStation. Aim for ≥ 7 for standard RNA-seq; ≥ 8 for isoform-level work. Degraded RNA (RIN < 6) biases 3′ ends.</li>
+<li><strong>DV200:</strong> Percentage of fragments > 200 nt. Used for FFPE samples where RIN is unreliable. DV200 ≥ 30% is acceptable for 3′-tag sequencing (e.g., QuantSeq).</li>
+</ul>
+<p>Always measure RNA quality <em>before</em> library prep. Document RIN/DV200 for every sample; include in metadata.</p>
+</section>
+
+<section>
+<h2>Metadata Checklist</h2>
+<p>Create a sample sheet (CSV/TSV) <em>before</em> sequencing with these columns:</p>
+<table>
+<thead>
+<tr><th>Column</th><th>Example</th><th>Required?</th></tr>
+</thead>
+<tbody>
+<tr><td>sample_id</td><td>S001</td><td>Yes</td></tr>
+<tr><td>condition</td><td>treated</td><td>Yes</td></tr>
+<tr><td>replicate</td><td>1</td><td>Yes</td></tr>
+<tr><td>batch</td><td>batch1</td><td>If applicable</td></tr>
+<tr><td>RIN</td><td>8.5</td><td>Yes</td></tr>
+<tr><td>library_prep_date</td><td>2024-01-15</td><td>Yes</td></tr>
+<tr><td>sequencing_lane</td><td>L001</td><td>If multiplexed</td></tr>
+<tr><td>strandedness</td><td>reverse</td><td>Yes</td></tr>
+<tr><td>read_length</td><td>150</td><td>Yes</td></tr>
+<tr><td>notes</td><td>low yield, re-extracted</td><td>Optional</td></tr>
+</tbody>
+</table>
+</section>
+
+<section>
+<h2>Common Pitfalls</h2>
+<ol>
+<li><strong>No biological replicates:</strong> "We only have one sample per condition, but we sequenced it deeply." — Cannot estimate biological variance; no p-values possible.</li>
+<li><strong>Pseudoreplication:</strong> Treating technical replicates as biological replicates inflates false positives.</li>
+<li><strong>Confounded batch and condition:</strong> All controls in batch 1, all treated in batch 2. Unfixable.</li>
+<li><strong>Insufficient depth for the question:</strong> 10M reads for splicing analysis; 5M reads for low-abundance transcripts.</li>
+<li><strong>Ignoring strandedness:</strong> Quantifying a reverse-stranded library as unstranded misassigns reads.</li>
+<li><strong>Poor RNA quality not documented:</strong> Degraded samples distort expression profiles, especially 3′ bias.</li>
+</ol>
+</section>
+
+<section>
+<h2>Quick Design Checklist</h2>
+<ul>
+<li>[ ] ≥ 3 biological replicates per condition (5–6 preferred)</li>
+<li>[ ] Technical replicates identified and will be pooled/averaged</li>
+<li>[ ] Controls matched to treatments (vehicle, time-matched)</li>
+<li>[ ] Samples randomized across library prep batches and sequencing lanes</li>
+<li>[ ] Sequencing depth appropriate for the biological question</li>
+<li>[ ] Paired-end reads (2 × 75 bp minimum, 2 × 150 bp preferred)</li>
+<li>[ ] Library strandedness known and recorded</li>
+<li>[ ] RNA quality (RIN/DV200) measured for every sample</li>
+<li>[ ] Sample sheet with all metadata columns created</li>
+<li>[ ] Power calculation performed (or justified by precedent)</li>
+</ul>
+</section>
+</main>
+<footer>
+<p>Built for the RNA-seq Data Analysis workshop. <a href="https://github.com/chaoqh/chaoqh_llm">Repository</a></p>
+</footer>
+</body>
+</html>

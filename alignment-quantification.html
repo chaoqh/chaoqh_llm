@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alignment & Quantification — RNA-seq Data Analysis</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+<h1>RNA-seq Data Analysis</h1>
+<p class="subtitle">A hands-on introduction for graduate students in genomics</p>
+</header>
+<nav>
+<ul>
+<li><a href="index.html">Overview</a></li>
+<li><a href="experimental-design.html">Experimental Design</a></li>
+<li><a href="quality-control.html">Quality Control</a></li>
+<li><a href="alignment-quantification.html" class="active">Alignment &amp; Quantification</a></li>
+<li><a href="differential-expression.html">Differential Expression</a></li>
+<li><a href="functional-analysis.html">Functional Analysis</a></li>
+</ul>
+</nav>
+<main>
+<section>
+<h2>From Reads to Counts: Alignment and Quantification</h2>
+<p>After quality control and trimming, the next step is determining where each read came from in the genome or transcriptome, and counting how many reads map to each gene. This produces the <strong>count matrix</strong> — rows = genes, columns = samples — that is the input for differential expression analysis.</p>
+</section>
+
+<section>
+<h2>Two Main Strategies</h2>
+<div class="concepts">
+<div class="concept">
+<h3>Alignment-based (Genome Alignment)</h3>
+<p>Map reads to the reference genome with a splice-aware aligner (STAR, HISAT2), then count reads overlapping gene models (featureCounts, HTSeq-count).</p>
+<p><strong>Pros:</strong> Detects novel splice junctions, enables variant calling, visualizable in genome browser, gold standard for accuracy.</p>
+<p><strong>Cons:</strong> Slower (15–60 min/sample), larger intermediate files (BAM ~5–15 GB).</p>
+</div>
+<div class="concept">
+<h3>Alignment-free (Pseudoalignment / Quasi-mapping)</h3>
+<p>Map reads directly to the reference transcriptome (Salmon, kallisto). No genome alignment, no BAM file. Estimates transcript abundance via lightweight indexing and EM algorithm.</p>
+<p><strong>Pros:</strong> Very fast (1–5 min/sample), low memory, no BAM files, transcript-level estimates built-in.</p>
+<p><strong>Cons:</strong> Cannot detect novel splicing, no genome browser visualization, relies on transcriptome annotation completeness.</p>
+</div>
+</div>
+<p><strong>Recommendation for this course:</strong> Use alignment-based (STAR + featureCounts) for learning — it teaches the concepts and produces inspectable BAMs. For production pipelines with many samples, Salmon/kallisto are excellent and well-validated.</p>
+</section>
+
+<section>
+<h2>Reference Genome and Annotation</h2>
+<p>You need two files from the same release (e.g., Ensembl release 110, GENCODE v47):</p>
+<ul>
+<li><strong>Genome FASTA:</strong> Primary assembly (chr1–chr22, chrX, chrY, chrM for human). Avoid "toplevel" which includes patches/haplotypes.</li>
+<li><strong>Annotation GTF/GFF3:</strong> Gene models (exons, CDS, UTRs, gene/transcript IDs, biotypes). Match the genome assembly version exactly.</li>
+</ul>
+<p>Download from <a href="https://www.ensembl.org">Ensembl</a>, <a href="https://www.gencodegenes.org">GENCODE</a>, or <a href="https://hgdownload.soe.ucsc.edu">UCSC</a>. For human: GRCh38.p14 (Ensembl 110) or hg38 (GENCODE v47).</p>
+</section>
+
+<section>
+<h2>STAR: Splice-Aware Genome Alignment</h2>
+<p>STAR (Spliced Transcripts Alignment to a Reference) is the most widely used RNA-seq aligner. Two-step process:</p>
+<h3>1. Build Genome Index</h3>
+<pre><code>STAR --runMode genomeGenerate \
+     --genomeDir star_index/ \
+     --genomeFastaFiles GRCh38.primary_assembly.genome.fa \
+     --sjdbGTFfile gencode.v47.annotation.gtf \
+     --sjdbOverhang 149  # read length - 1 (for 150 bp reads)
+     --runThreadN 16</code></pre>
+<p><code>--sjdbOverhang</code> should be <code>read_length - 1</code>. For mixed read lengths, use the maximum - 1. Index building takes ~30 min and ~35 GB RAM for human.</p>
+<h3>2. Align Samples</h3>
+<pre><code>STAR --genomeDir star_index/ \
+     --readFilesIn sample_R1.trimmed.fastq.gz sample_R2.trimmed.fastq.gz \
+     --readFilesCommand zcat \
+     --outFileNamePrefix aligned/sample_ \
+     --outSAMtype BAM SortedByCoordinate \
+     --outSAMunmapped Within \
+     --outSAMattributes NH HI AS nM NM MD \
+     --quantMode GeneCounts \
+     --twopassMode Basic \
+     --runThreadN 16</code></pre>
+<h3>Key STAR Options</h3>
+<table>
+<thead>
+<tr><th>Option</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>--twopassMode Basic</code></td><td>Novel junction discovery in pass 1, re-align in pass 2. Recommended.</td></tr>
+<tr><td><code>--quantMode GeneCounts</code></td><td>Outputs <code>ReadsPerGene.out.tab</code> (featureCounts-like counts) directly.</td></tr>
+<tr><td><code>--outSAMtype BAM SortedByCoordinate</code></td><td>Sorted BAM output (required for downstream tools).</td></tr>
+<tr><td><code>--outFilterMultimapNmax 20</code></td><td>Max loci per read. Default 10; increase for repetitive genomes.</td></tr>
+<tr><td><code>--alignSJDBoverhangMin 1</code></td><td>Minimum overhang for annotated junctions.</td></tr>
+<tr><td><code>--alignIntronMin 20 --alignIntronMax 1,000,000</code></td><td>Intron size range. Adjust for organism.</td></tr>
+</tbody>
+</table>
+</section>
+
+<section>
+<h2>featureCounts: Counting Reads per Gene</h2>
+<p>If you didn't use <code>--quantMode GeneCounts</code> in STAR, or prefer featureCounts' handling of multimappers and strandedness:</p>
+<pre><code>featureCounts -T 16 -p -B -C \
+              -a gencode.v47.annotation.gtf \
+              -o counts.txt \
+              aligned/sample_Aligned.sortedByCoord.out.bam</code></pre>
+<h3>Key Options</h3>
+<ul>
+<li><code>-p</code>: Paired-end reads (counts fragments, not reads)</li>
+<li><code>-B</code>: Require both ends properly aligned</li>
+<li><code>-C</code>: Exclude chimeric reads (different chromosomes)</li>
+<li><code>-s 0/1/2</code>: Strandedness: 0=unstranded, 1=forward, 2=reverse. <strong>Must match library prep.</strong></li>
+<li><code>-t exon -g gene_id</code>: Feature type and attribute (defaults; usually correct for GENCODE)</li>
+<li><code>-M</code>: Count multimapping reads (fractionally). Default: ignore multimappers.</li>
+<li><code>-O</code>: Allow reads to be assigned to multiple overlapping features.</li>
+</ul>
+<p>Output: <code>counts.txt</code> with gene IDs as rows, samples as columns, plus a summary file with assignment statistics.</p>
+</section>
+
+<section>
+<h2>Salmon: Fast Transcript-Level Quantification</h2>
+<p>For alignment-free quantification (recommended for large studies):</p>
+<h3>1. Build Transcriptome Index</h3>
+<pre><code>salmon index -t gencode.v47.transcripts.fa \
+             -i salmon_index \
+             --type quasi \
+             -k 31</code></pre>
+<h3>2. Quantify Samples</h3>
+<pre><code>salmon quant -i salmon_index \
+             -l ISR \  # library type: I=inward, S=stranded, R=reverse (read 1 = antisense)
+             -1 sample_R1.trimmed.fastq.gz \
+             -2 sample_R2.trimmed.fastq.gz \
+             -p 16 \
+             --validateMappings \
+             -o salmon_out/sample</code></pre>
+<p>Output: <code>quant.sf</code> with transcript-level TPM, NumReads, and effective length. Use <code>tximport</code> (R) to summarize to gene level for DESeq2/edgeR.</p>
+<h3>Library Type Codes (Salmon <code>-l</code>)</h3>
+<table>
+<thead>
+<tr><th>Code</th><th>Meaning</th><th>Example Protocol</th></tr>
+</thead>
+<tbody>
+<tr><td>IU</td><td>Inward, unstranded</td><td>Standard Illumina TruSeq</td></tr>
+<tr><td>ISF</td><td>Inward, stranded, forward (read 1 = sense)</td><td>dUTP-based, read 1 = sense</td></tr>
+<tr><td>ISR</td><td>Inward, stranded, reverse (read 1 = antisense)</td><td>dUTP-based, read 1 = antisense (common)</td></tr>
+</tbody>
+</table>
+</section>
+
+<section>
+<h2>Comparing Count Matrices</h2>
+<p>Regardless of method, you need a gene × sample count matrix for differential expression. Key checks:</p>
+<table>
+<thead>
+<tr><th>Check</th><th>Expected</th><th>Concern If</th></tr>
+</thead>
+<tbody>
+<tr><td>Genes with > 0 counts in all samples</td><td>12,000–18,000 (human)</td><td>< 8,000</td></tr>
+<tr><td>Median counts per sample</td><td>10–30 million (for 30M reads)</td><td>< 5M or > 50M</td></tr>
+<tr><td>% assigned reads (featureCounts)</td><td>60–85%</td><td>< 50%</td></tr>
+<tr><td>% multimapping (featureCounts)</td><td>5–15%</td><td>> 30%</td></tr>
+<tr><td>% ambiguous (overlapping genes)</td><td>1–5%</td><td>> 10%</td></tr>
+<tr><td>Correlation between replicates</td><td>Pearson > 0.95 (log counts)</td><td>< 0.90</td></tr>
+</tbody>
+</table>
+</section>
+
+<section>
+<h2>Handling Multimapping Reads</h2>
+<ul>
+<li><strong>Genomic multimappers:</strong> Reads mapping to multiple loci (paralogs, repeats). STAR reports NH tag. Options: ignore (default), count fractionally (<code>-M</code> in featureCounts), or assign probabilistically (Salmon/kallisto do this via EM).</li>
+<li><strong>Multimapping across gene models:</strong> Overlapping genes on opposite strands. Stranded libraries resolve this; unstranded libraries need <code>-O</code> or fractional assignment.</li>
+</ul>
+<p><strong>Best practice:</strong> For DESeq2/edgeR, use unique-mapping reads only (default featureCounts). Multimapper handling introduces assumptions; unique reads are cleaner for differential expression.</p>
+</section>
+
+<section>
+<h2>Gene ID Conversion</h2>
+<p>Count matrices use Ensembl gene IDs (ENSG00000123456). For downstream analysis and reporting, convert to gene symbols:</p>
+<pre><code># R with biomaRt or AnnotationDbi
+library(org.Hs.eg.db)
+ids <- rownames(counts)
+symbols <- mapIds(org.Hs.eg.db, keys=ids, column="SYMBOL", keytype="ENSEMBL", multiVals="first")
+# Keep only genes with symbols
+counts <- counts[!is.na(symbols), ]
+rownames(counts) <- symbols[!is.na(symbols)]</code></pre>
+<p>Always keep the Ensembl ID as a column; symbols change between releases.</p>
+</section>
+
+<section>
+<h2>Alignment vs. Quantification Checklist</h2>
+<ul>
+<li>[ ] Reference genome FASTA and GTF from same release downloaded</li>
+<li>[ ] STAR genome index built with correct <code>--sjdbOverhang</code></li>
+<li>[ ] All samples aligned with <code>--twopassMode Basic</code></li>
+<li>[ ] BAM files sorted by coordinate, indexed (<code>samtools index</code>)</li>
+<li>[ ] featureCounts run with correct strandedness (<code>-s 0/1/2</code>)</li>
+<li>[ ] Count matrix generated: genes × samples, integer counts</li>
+<li>[ ] Assignment rates > 60% for all samples</li>
+<li>[ ] Replicate correlation (log counts) > 0.95</li>
+<li>[ ] Gene IDs converted to symbols for reporting (Ensembl IDs retained)</li>
+<li>[ ] Count matrix saved as <code>counts_matrix.txt</code> (tab-delimited)</li>
+</ul>
+</section>
+</main>
+<footer>
+<p>Built for the RNA-seq Data Analysis workshop. <a href="https://github.com/chaoqh/chaoqh_llm">Repository</a></p>
+</footer>
+</body>
+</html>

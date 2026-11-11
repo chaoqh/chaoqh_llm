@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RNA-seq Data Analysis — An Introduction</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+<h1>RNA-seq Data Analysis</h1>
+<p class="subtitle">A hands-on introduction for graduate students in genomics</p>
+</header>
+<nav>
+<ul>
+<li><a href="index.html" class="active">Overview</a></li>
+<li><a href="experimental-design.html">Experimental Design</a></li>
+<li><a href="quality-control.html">Quality Control</a></li>
+<li><a href="alignment-quantification.html">Alignment &amp; Quantification</a></li>
+<li><a href="differential-expression.html">Differential Expression</a></li>
+<li><a href="functional-analysis.html">Functional Analysis</a></li>
+</ul>
+</nav>
+<main>
+<section>
+<h2>What is RNA-seq?</h2>
+<p>RNA sequencing (RNA-seq) is a high-throughput sequencing technique that captures a snapshot of the transcriptome — the complete set of RNA transcripts in a cell or tissue at a given moment. By sequencing cDNA synthesized from RNA, RNA-seq reveals which genes are expressed, at what levels, and what alternative isoforms exist.</p>
+</section>
+<section>
+<h2>Why RNA-seq Matters</h2>
+<ul>
+<li><strong>Quantitative:</strong> Measures expression levels across the entire dynamic range (from a few to millions of transcripts per cell)</li>
+<li><strong>Comprehensive:</strong> Detects known and novel transcripts, splice variants, fusion genes, and non-coding RNAs</li>
+<li><strong>Unbiased:</strong> No prior knowledge of the genome sequence is strictly required (though a reference helps)</li>
+<li><strong>Versatile:</strong> Applicable to bulk tissue, single cells, and even spatial transcriptomics</li>
+</ul>
+</section>
+<section>
+<h2>The RNA-seq Workflow</h2>
+<p>This site walks through the major steps of a typical bulk RNA-seq analysis pipeline:</p>
+<ol>
+<li><a href="experimental-design.html"><strong>Experimental Design</strong></a> — Replicates, controls, sequencing depth, and avoiding batch effects</li>
+<li><a href="quality-control.html"><strong>Quality Control</strong></a> — Assessing raw read quality with FastQC, trimming adapters and low-quality bases</li>
+<li><a href="alignment-quantification.html"><strong>Alignment &amp; Quantification</strong></a> — Mapping reads to a reference genome/transcriptome and counting reads per gene</li>
+<li><a href="differential-expression.html"><strong>Differential Expression</strong></a> — Statistical testing for expression changes between conditions (DESeq2, edgeR, limma-voom)</li>
+<li><a href="functional-analysis.html"><strong>Functional Analysis</strong></a> — Gene ontology, pathway enrichment, and visualization</li>
+</ol>
+</section>
+<section>
+<h2>Key Concepts You Will Learn</h2>
+<div class="concepts">
+<div class="concept">
+<h3>Biological Replicates</h3>
+<p>Independent samples from different biological units (e.g., different mice, different patients). Essential for estimating biological variance. <strong>Minimum: 3 per condition.</strong></p>
+</div>
+<div class="concept">
+<h3>Count Data Properties</h3>
+<p>RNA-seq yields integer counts per gene. These are <em>not</em> normally distributed — they follow a negative binomial distribution with mean-variance relationship.</p>
+</div>
+<div class="concept">
+<h3>Normalization</h3>
+<p>Raw counts must be normalized for library size and composition bias before comparison. Common methods: median-of-ratios (DESeq2), TMM (edgeR), TPM/FPKM for within-sample comparison.</p>
+</div>
+<div class="concept">
+<h3>Multiple Testing</h3>
+<p>Testing ~20,000 genes simultaneously requires correction. RNA-seq uses the Benjamini-Hochberg procedure to control the false discovery rate (FDR), typically at 5%.</p>
+</div>
+</div>
+</section>
+<section>
+<h2>Prerequisites</h2>
+<ul>
+<li>Basic familiarity with the Unix command line</li>
+<li>Understanding of central dogma (DNA → RNA → protein)</li>
+<li>Basic statistics: mean, variance, p-values, hypothesis testing</li>
+<li>R or Python for downstream analysis (examples use R/Bioconductor)</li>
+</ul>
+</section>
+<section>
+<h2>Software Used in This Course</h2>
+<table>
+<thead>
+<tr><th>Step</th><th>Tools</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td>Quality Control</td><td>FastQC, MultiQC</td><td>Assess read quality, GC content, adapter contamination</td></tr>
+<tr><td>Trimming</td><td>Trimmomatic, fastp, cutadapt</td><td>Remove adapters, low-quality bases, poly-A tails</td></tr>
+<tr><td>Alignment</td><td>STAR, HISAT2</td><td>Splice-aware mapping to reference genome</td></tr>
+<tr><td>Quantification</td><td>featureCounts, Salmon, kallisto</td><td>Count reads per gene/transcript</td></tr>
+<tr><td>Differential Expression</td><td>DESeq2, edgeR, limma-voom</td><td>Statistical testing for expression changes</td></tr>
+<tr><td>Functional Analysis</td><td>clusterProfiler, GSEA, enrichR</td><td>GO/KEGG enrichment, pathway analysis</td></tr>
+</tbody>
+</table>
+</section>
+</main>
+<footer>
+<p>Built for the RNA-seq Data Analysis workshop. <a href="https://github.com/chaoqh/chaoqh_llm">Repository</a></p>
+</footer>
+</body>
+</html>

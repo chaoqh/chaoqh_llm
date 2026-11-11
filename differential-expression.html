@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Differential Expression — RNA-seq Data Analysis</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+<h1>RNA-seq Data Analysis</h1>
+<p class="subtitle">A hands-on introduction for graduate students in genomics</p>
+</header>
+<nav>
+<ul>
+<li><a href="index.html">Overview</a></li>
+<li><a href="experimental-design.html">Experimental Design</a></li>
+<li><a href="quality-control.html">Quality Control</a></li>
+<li><a href="alignment-quantification.html">Alignment &amp; Quantification</a></li>
+<li><a href="differential-expression.html" class="active">Differential Expression</a></li>
+<li><a href="functional-analysis.html">Functional Analysis</a></li>
+</ul>
+</nav>
+<main>
+<section>
+<h2>Differential Expression: Finding Genes That Change</h2>
+<p>Differential expression (DE) analysis tests whether each gene's expression level differs between conditions (e.g., treated vs. control). The input is a <strong>count matrix</strong> (genes × samples, integer counts). The output is a ranked list of genes with log2 fold changes, p-values, and adjusted p-values (FDR).</p>
+</section>
+
+<section>
+<h2>Why Specialized Methods for Count Data?</h2>
+<div class="concepts">
+<div class="concept">
+<h3>Counts are not normally distributed</h3>
+<p>RNA-seq yields integer counts. Variance increases with mean (mean-variance relationship). Standard t-tests assume constant variance and normality — both violated.</p>
+</div>
+<div class="concept">
+<h3>Negative binomial distribution</h3>
+<p>RNA-seq counts follow a negative binomial (NB) distribution: NB(μ, α) where μ = mean, α = dispersion. Dispersion captures biological + technical variability beyond Poisson sampling noise.</p>
+</div>
+<div class="concept">
+<h3>Shrinkage stabilizes estimates</h3>
+<p>With few replicates (n=3), per-gene dispersion estimates are unreliable. DESeq2/edgeR/limma-voom "shrink" gene-wise dispersions toward a fitted trend, borrowing information across genes.</p>
+</div>
+<div class="concept">
+<h3>Library size normalization</h3>
+<p>Samples have different sequencing depths. Normalization (median-of-ratios in DESeq2, TMM in edgeR) computes size factors so counts are comparable across samples.</p>
+</div>
+</div>
+</section>
+
+<section>
+<h2>The Three Main R/Bioconductor Packages</h2>
+<table>
+<thead>
+<tr><th>Package</th><th>Method</th><th>Normalization</th><th>Dispersion</th><th>Best For</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>DESeq2</strong></td><td>Wald test (NB GLM)</td><td>Median-of-ratios</td><td>Parametric fit + shrinkage</td><td>General purpose; small n; most widely used</td></tr>
+<tr><td><strong>edgeR</strong></td><td>QLF test or LRT (NB GLM)</td><td>TMM (trimmed mean of M-values)</td><td>Empirical Bayes shrinkage</td><td>Complex designs; GLM flexibility; larger n</td></tr>
+<tr><td><strong>limma-voom</strong></td><td>Linear model + empirical Bayes</td><td>TMM + voom precision weights</td><td>Observation-level weights</td><td>Large n (≥ 20/group); microarray-like workflows; continuous covariates</td></tr>
+</tbody>
+</table>
+<p>All three are excellent and give highly concordant results for standard two-group comparisons. DESeq2 is the default choice for most users.</p>
+</section>
+
+<section>
+<h2>DESeq2 Workflow (Step by Step)</h2>
+<pre><code># 1. Load count matrix and sample metadata
+counts <- read.delim("counts_matrix.txt", row.names=1, check.names=FALSE)
+coldata <- read.delim("sample_metadata.txt", row.names=1)
+
+# Ensure column order matches
+stopifnot(all(colnames(counts) == rownames(coldata)))
+
+# 2. Create DESeqDataSet
+library(DESeq2)
+dds <- DESeqDataSetFromMatrix(countData = counts,
+                              colData = coldata,
+                              design = ~ condition)  # formula: condition is the variable of interest
+
+# 3. Pre-filter low-count genes (recommended)
+keep <- rowSums(counts(dds) >= 10) >= 3  # at least 10 counts in at least 3 samples
+dds <- dds[keep,]
+
+# 4. Run the DESeq pipeline (normalization, dispersion, testing)
+dds <- DESeq(dds)
+
+# 5. Extract results for the contrast of interest
+res <- results(dds, contrast=c("condition", "treated", "control"))
+# contrast = (factor_name, numerator, denominator) → log2FC = treated/control
+
+# 6. Shrink log2 fold changes for visualization/ranking (apeglm recommended)
+resLFC <- lfcShrink(dds, contrast=c("condition", "treated", "control"), type="apeglm")
+
+# 7. Order by adjusted p-value
+resOrdered <- resLFC[order(resLFC$padj),]
+
+# 8. Save results
+write.csv(as.data.frame(resOrdered), "DESeq2_results_treated_vs_control.csv")</code></pre>
+</section>
+
+<section>
+<h2>Understanding the Results Table</h2>
+<table>
+<thead>
+<tr><th>Column</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td>baseMean</td><td>Mean of normalized counts across all samples</td></tr>
+<tr><td>log2FoldChange</td><td>Log2 fold change (numerator/denominator). Positive = up in numerator.</td></tr>
+<tr><td>lfcSE</td><td>Standard error of log2 fold change</td></tr>
+<tr><td>stat</td><td>Wald statistic (log2FC / lfcSE)</td></tr>
+<tr><td>pvalue</td><td>Raw p-value from Wald test</td></tr>
+<tr><td>padj</td><td>Benjamini-Hochberg adjusted p-value (FDR). <strong>This is the key column.</strong></td></tr>
+</tbody>
+</table>
+<p><strong>Significance threshold:</strong> Typically <code>padj < 0.05</code> (5% FDR). Some studies use <code>padj < 0.05 & abs(log2FoldChange) > 1</code> (2-fold change) for biological relevance.</p>
+</section>
+
+<section>
+<h2>Visualization: MA Plot and Volcano Plot</h2>
+<div class="concepts">
+<div class="concept">
+<h3>MA Plot</h3>
+<p>log2 fold change (M) vs. mean expression (A). Shows that low-count genes have high variance (wide spread at left). DESeq2's <code>plotMA(resLFC)</code> highlights significant genes in red.</p>
+</div>
+<div class="concept">
+<h3>Volcano Plot</h3>
+<p>-log10(p-value) vs. log2 fold change. Symmetric "volcano" shape. Significant genes in top corners. Use <code>EnhancedVolcano</code> package for publication-ready plots.</p>
+</div>
+<div class="concept">
+<h3>PCA Plot</h3>
+<p>Principal component analysis of variance-stabilized counts. Shows sample relationships. Replicates should cluster by condition. Outliers visible. Use <code>plotPCA(vst(dds), intgroup="condition")</code>.</p>
+</div>
+<div class="concept">
+<h3>Heatmap of Top Genes</h3>
+<p>Expression of top 20–50 DE genes across samples. Use variance-stabilized or rlog-transformed counts. <code>pheatmap</code> or <code>ComplexHeatmap</code>.</p>
+</div>
+</div>
+</section>
+
+<section>
+<h2>Complex Designs</h2>
+<p>DESeq2 handles complex experimental designs via the design formula:</p>
+<ul>
+<li><code>~ batch + condition</code>: Blocking on batch (batch is a nuisance factor)</li>
+<li><code>~ genotype + treatment + genotype:treatment</code>: Interaction term (does treatment effect depend on genotype?)</li>
+<li><code>~ time + condition + time:condition</code>: Time course with interaction</li>
+<li><code>~ patient + condition</code>: Paired design (patient as blocking factor)</li>
+</ul>
+<p>For interactions, use <code>results(dds, name="genotypeB.treatmenttreated")</code> or <code>contrast=list(...)</code>.</p>
+</section>
+
+<section>
+<h2>Independent Filtering</h2>
+<p>DESeq2 automatically performs independent filtering: genes with low mean counts (low power) are removed from multiple testing correction, increasing power for the remaining genes. The threshold is chosen to maximize the number of rejections. Control with <code>results(dds, independentFiltering=FALSE)</code> to disable.</p>
+</section>
+
+<section>
+<h2>Common Pitfalls</h2>
+<ol>
+<li><strong>Using normalized counts (CPM, TPM, FPKM) as input to DESeq2:</strong> DESeq2 requires <em>raw integer counts</em>. It does its own normalization internally.</li>
+<li><strong>Forgetting to pre-filter:</strong> Testing genes with 0–1 counts across all samples wastes multiple testing budget and can cause numerical issues.</li>
+<li><strong>Wrong contrast direction:</strong> <code>contrast=c("condition", "treated", "control")</code> gives log2FC = treated/control. Swap if you want control/treated.</li>
+<li><strong>Ignoring batch effects:</strong> If batch is confounded with condition, no statistical fix exists. If not confounded, include in design: <code>~ batch + condition</code>.</li>
+<li><strong>Using padj without checking effect size:</strong> A gene with padj=0.04 and log2FC=0.1 (1.07-fold) is statistically significant but biologically negligible. Report both.</li>
+<li><strong>Comparing padj across different analyses:</strong> padj depends on the set of genes tested. Comparing padj from a 2-group vs. 3-group analysis is not meaningful.</li>
+<li><strong>Not checking model assumptions:</strong> Plot dispersions (<code>plotDispEsts(dds)</code>), check for outliers (Cook's distance in results).</li>
+</ol>
+</section>
+
+<section>
+<h2>edgeR Quick Reference</h2>
+<pre><code>library(edgeR)
+y <- DGEList(counts=counts, group=coldata$condition)
+keep <- filterByExpr(y)  # automatic pre-filtering
+y <- y[keep,,keep.lib.sizes=FALSE]
+y <- calcNormFactors(y, method="TMM")
+design <- model.matrix(~ condition, data=coldata)
+y <- estimateDisp(y, design)
+fit <- glmQLFit(y, design)
+qlf <- glmQLFTest(fit, coef=2)  # coefficient for condition
+topTags(qlf, n=Inf)</code></pre>
+</section>
+
+<section>
+<h2>limma-voom Quick Reference</h2>
+<pre><code>library(limma)
+library(edgeR)
+y <- DGEList(counts=counts, group=coldata$condition)
+keep <- filterByExpr(y)
+y <- y[keep,,keep.lib.sizes=FALSE]
+y <- calcNormFactors(y)
+design <- model.matrix(~ condition, data=coldata)
+v <- voom(y, design, plot=TRUE)
+fit <- lmFit(v, design)
+fit <- eBayes(fit)
+topTable(fit, coef=2, number=Inf)</code></pre>
+</section>
+
+<section>
+<h2>Differential Expression Checklist</h2>
+<ul>
+<li>[ ] Raw count matrix (genes × samples) prepared</li>
+<li>[ ] Sample metadata with condition column matching count matrix columns</li>
+<li>[ ] Low-count genes filtered (e.g., ≥ 10 counts in ≥ n samples)</li>
+<li>[ ] DESeq2 (or edgeR/limma-voom) run with correct design formula</li>
+<li>[ ] Batch effects included in design if present and not confounded</li>
+<li>[ ] Results extracted with correct contrast direction</li>
+<li>[ ] Log2 fold changes shrunk (apeglm) for ranking/visualization</li>
+<li>[ ] MA plot, volcano plot, PCA plot generated and inspected</li>
+<li>[ ] Significant genes: padj < 0.05 (and optionally |log2FC| > 1)</li>
+<li>[ ] Results table saved with gene IDs, symbols, baseMean, log2FC, pvalue, padj</li>
+<li>[ ] Top genes examined for biological plausibility</li>
+</ul>
+</section>
+</main>
+<footer>
+<p>Built for the RNA-seq Data Analysis workshop. <a href="https://github.com/chaoqh/chaoqh_llm">Repository</a></p>
+</footer>
+</body>
+</html>

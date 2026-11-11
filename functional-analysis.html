@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Functional Analysis — RNA-seq Data Analysis</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+<h1>RNA-seq Data Analysis</h1>
+<p class="subtitle">A hands-on introduction for graduate students in genomics</p>
+</header>
+<nav>
+<ul>
+<li><a href="index.html">Overview</a></li>
+<li><a href="experimental-design.html">Experimental Design</a></li>
+<li><a href="quality-control.html">Quality Control</a></li>
+<li><a href="alignment-quantification.html">Alignment &amp; Quantification</a></li>
+<li><a href="differential-expression.html">Differential Expression</a></li>
+<li><a href="functional-analysis.html" class="active">Functional Analysis</a></li>
+</ul>
+</nav>
+<main>
+<section>
+<h2>Functional Analysis: From Gene Lists to Biological Insight</h2>
+<p>Differential expression gives you a list of genes that change. Functional analysis answers: <em>what do these genes do together?</em> It identifies overrepresented biological themes — pathways, processes, molecular functions — turning a gene list into testable hypotheses.</p>
+</section>
+
+<section>
+<h2>Two Complementary Approaches</h2>
+<div class="concepts">
+<div class="concept">
+<h3>Over-Representation Analysis (ORA)</h3>
+<p>Input: a list of "significant" genes (e.g., padj < 0.05). Tests whether a gene set (GO term, KEGG pathway) contains more significant genes than expected by chance. Uses Fisher's exact test / hypergeometric test.</p>
+<p><strong>Pros:</strong> Simple, fast, intuitive. <strong>Cons:</strong> Ignores effect sizes; sensitive to significance threshold; treats all significant genes equally.</p>
+</div>
+<div class="concept">
+<h3>Gene Set Enrichment Analysis (GSEA)</h3>
+<p>Input: <em>all</em> genes ranked by a continuous metric (e.g., signed -log10(p) × sign(log2FC), or Wald statistic). Tests whether genes in a set cluster at the top or bottom of the ranked list. No arbitrary threshold.</p>
+<p><strong>Pros:</strong> Uses full data; detects coordinated small changes; more powerful for subtle effects. <strong>Cons:</strong> More complex; requires ranked list; correlation structure matters.</p>
+</div>
+</div>
+<p><strong>Recommendation:</strong> Run both. ORA for clear, strong signals; GSEA for subtle, coordinated changes. They often agree but each catches things the other misses.</p>
+</section>
+
+<section>
+<h2>Gene Ontology (GO) and Pathway Databases</h2>
+<table>
+<thead>
+<tr><th>Database</th><th>Content</th><th>Organisms</th><th>Access</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>Gene Ontology (GO)</strong></td><td>Biological Process (BP), Molecular Function (MF), Cellular Component (CC)</td><td>All (via annotations)</td><td>GO.org, Bioconductor OrgDb</td></tr>
+<tr><td><strong>KEGG</strong></td><td>Metabolic and signaling pathways</td><td>Many model organisms</td><td>KEGG.jp (subscription for API), clusterProfiler</td></tr>
+<tr><td><strong>Reactome</strong></td><td>Curated human pathways, inferred for others</td><td>Human + 20+ species</td><td>Reactome.org, ReactomePA</td></tr>
+<tr><td><strong>MSigDB</strong></td><td>Hallmark, C2 (curated), C5 (GO), C7 (immunologic)</td><td>Human, mouse</td><td>GSEA-MSigDB, msigdbr R package</td></tr>
+<tr><td><strong>WikiPathways</strong></td><td>Community-curated pathways</td><td>Many</td><td>WikiPathways.org, clusterProfiler</td></tr>
+<tr><td><strong>DisGeNET</strong></td><td>Gene-disease associations</td><td>Human</td><td>DisGeNET.org</td></tr>
+</tbody>
+</table>
+</section>
+
+<section>
+<h2>ORA with clusterProfiler (R)</h2>
+<p><code>clusterProfiler</code> is the most popular Bioconductor package for functional analysis.</p>
+<pre><code>library(clusterProfiler)
+library(org.Hs.eg.db)  # human annotation; use org.Mm.eg.db for mouse, etc.
+
+# 1. Prepare gene lists
+# Significant genes (padj < 0.05)
+sig_genes <- rownames(resOrdered[resOrdered$padj < 0.05 & !is.na(resOrdered$padj), ])
+
+# Background: all genes tested (after pre-filtering)
+bg_genes <- rownames(resOrdered)
+
+# Convert to Entrez IDs (required by clusterProfiler)
+sig_entrez <- bitr(sig_genes, fromType="SYMBOL", toType="ENTREZID", OrgDb=org.Hs.eg.db)$ENTREZID
+bg_entrez  <- bitr(bg_genes,  fromType="SYMBOL", toType="ENTREZID", OrgDb=org.Hs.eg.db)$ENTREZID
+
+# 2. GO Over-Representation Analysis
+ego_bp <- enrichGO(gene          = sig_entrez,
+                   universe      = bg_entrez,
+                   OrgDb         = org.Hs.eg.db,
+                   ont           = "BP",        # "BP", "MF", or "CC"
+                   pAdjustMethod = "BH",
+                   pvalueCutoff  = 0.05,
+                   qvalueCutoff  = 0.05,
+                   readable      = TRUE)        # converts Entrez back to symbols
+
+# 3. KEGG Pathway Analysis
+ekegg <- enrichKEGG(gene         = sig_entrez,
+                    universe     = bg_entrez,
+                    organism     = "hsa",       # "hsa"=human, "mmu"=mouse
+                    pAdjustMethod = "BH",
+                    pvalueCutoff  = 0.05)
+
+# 4. View results
+head(ego_bp)
+head(ekegg)
+
+# 5. Visualize
+dotplot(ego_bp, showCategory=20) + ggtitle("GO Biological Process")
+barplot(ego_bp, showCategory=20)
+emapplot(pairwise_termsim(ego_bp))  # enrichment map: term similarity network
+cnetplot(ego_bp, categorySize="pvalue", foldChange=log2FC_vector)  # gene-term network
+
+# 6. Save
+write.csv(as.data.frame(ego_bp), "GO_BP_enrichment.csv")
+write.csv(as.data.frame(ekegg), "KEGG_enrichment.csv")</code></pre>
+</section>
+
+<section>
+<h2>GSEA with clusterProfiler</h2>
+<pre><code># 1. Create ranked gene list (all genes, not just significant)
+# Metric: signed -log10(pvalue) * sign(log2FC) or Wald statistic
+geneList <- resOrdered$stat  # Wald statistic from DESeq2
+names(geneList) <- rownames(resOrdered)
+geneList <- sort(geneList, decreasing=TRUE)
+
+# Remove genes without Entrez mapping
+geneList_entrez <- bitr(names(geneList), fromType="SYMBOL", toType="ENTREZID", OrgDb=org.Hs.eg.db)
+geneList_mapped <- geneList[geneList_entrez$SYMBOL]
+names(geneList_mapped) <- geneList_entrez$ENTREZID
+
+# 2. GO GSEA
+gse_go <- gseGO(geneList     = geneList_mapped,
+                OrgDb        = org.Hs.eg.db,
+                ont          = "BP",
+                nPerm        = 10000,
+                minGSSize    = 10,
+                maxGSSize    = 500,
+                pvalueCutoff = 0.05,
+                verbose      = FALSE)
+
+# 3. KEGG GSEA
+gse_kegg <- gseKEGG(geneList     = geneList_mapped,
+                    organism     = "hsa",
+                    nPerm        = 10000,
+                    minGSSize    = 10,
+                    maxGSSize    = 500,
+                    pvalueCutoff = 0.05)
+
+# 4. MSigDB Hallmark GSEA (popular, well-curated)
+library(msigdbr)
+hallmark <- msigdbr(species="Homo sapiens", category="H") %>% 
+            dplyr::select(gs_name, entrez_gene)
+gse_hallmark <- GSEA(geneList_mapped, TERM2GENE=hallmark, pvalueCutoff=0.05)
+
+# 5. Visualize GSEA
+gseaplot2(gse_go, geneSetID=1:5)  # enrichment curves for top 5 terms
+ridgeplot(gse_go) + ggtitle("GSEA Ridge Plot")
+dotplot(gse_go, showCategory=20)
+</code></pre>
+</section>
+
+<section>
+<h2>Visualization Types and When to Use Them</h2>
+<table>
+<thead>
+<tr><th>Plot</th><th>Function</th><th>Best For</th></tr>
+</thead>
+<tbody>
+<tr><td>Dot plot</td><td><code>dotplot()</code></td><td>Overview of top terms: gene ratio, p-value, gene count</td></tr>
+<tr><td>Bar plot</td><td><code>barplot()</code></td><td>Simple ranking of terms by significance</td></tr>
+<tr><td>Enrichment map</td><td><code>emapplot()</code></td><td>Clustering related terms; seeing redundancy</td></tr>
+<tr><td>Category-gene network</td><td><code>cnetplot()</code></td><td>Showing which genes drive which terms</td></tr>
+<tr><td>GSEA enrichment curve</td><td><code>gseaplot2()</code></td><td>Visualizing running enrichment score for a term</td></tr>
+<tr><td>Ridge plot</td><td><code>ridgeplot()</code></td><td>Distribution of gene ranks per term (GSEA)</td></tr>
+<tr><td>Heatmap of genes × terms</td><td><code>heatplot()</code></td><td>Expression of leading-edge genes across samples</td></tr>
+</tbody>
+</table>
+</section>
+
+<section>
+<h2>Handling Redundancy: Term Similarity and Clustering</h2>
+<p>GO terms are hierarchical; many significant terms are parent/child or overlap heavily. Use semantic similarity to cluster:</p>
+<pre><code># Pairwise term similarity (Jaccard or semantic)
+ego_sim <- pairwise_termsim(ego_bp)
+
+# Cluster terms and plot as tree
+treeplot(ego_sim)
+
+# Or enrichment map with clustered layout
+emapplot(ego_sim, layout="nicely", cex_category=0.8)
+
+# Simplify: remove redundant terms (keep most significant in each cluster)
+ego_simplified <- simplify(ego_bp, cutoff=0.7, by="p.adjust", select_fun=min)
+# cutoff = similarity threshold (0.7 = moderate redundancy removal)
+</code></pre>
+</section>
+
+<section>
+<h2>Pathway Visualization: KEGG and Reactome Maps</h2>
+<p>View DEGs on pathway diagrams:</p>
+<pre><code># KEGG pathway view (colors genes by log2FC)
+library(pathview)
+pathview(gene.data  = log2FC_vector,  # named vector: EntrezID -> log2FC
+         pathway.id = "hsa04110",      # KEGG pathway ID (e.g., Cell cycle)
+         species    = "hsa",
+         limit      = list(gene=5, cpd=1))  # color scale limits
+
+# Reactome pathway analysis
+library(ReactomePA)
+reactome_enrich <- enrichPathway(gene=sig_entrez, universe=bg_entrez, pvalueCutoff=0.05, readable=TRUE)
+# View pathway diagram
+viewPathway("R-HSA-1640170", reactome_enrich)  # Reactome pathway ID
+</code></pre>
+</section>
+
+<section>
+<h2>Leading-Edge Analysis (GSEA)</h2>
+<p>For a significant GSEA term, the "leading edge" genes are those that appear before the peak enrichment score — the core drivers of the signal. Extract them:</p>
+<pre><code># For a specific GSEA result (e.g., first row)
+leading_edge_genes <- gse_go@result$core_enrichment[1]  # "/" separated Entrez IDs
+leading_entrez <- unlist(strsplit(leading_edge_genes, "/"))
+# Map back to symbols
+leading_symbols <- bitr(leading_entrez, fromType="ENTREZID", toType="SYMBOL", OrgDb=org.Hs.eg.db)
+# These are the high-priority genes for follow-up (qPCR, functional assays)
+</code></pre>
+</section>
+
+<section>
+<h2>Custom Gene Sets</h2>
+<p>Test your own hypotheses: literature-curated sets, TF targets from ChIP-seq, protein complexes, etc.</p>
+<pre><code># TERM2GENE format: data.frame with columns "term" and "gene" (Entrez or Symbol)
+my_genesets <- data.frame(
+  term = c("TF_A_targets", "TF_A_targets", "Complex_B", "Complex_B"),
+  gene = c("GENE1", "GENE2", "GENE3", "GENE4")
+)
+
+# ORA
+enricher(sig_entrez, TERM2GENE=my_genesets, universe=bg_entrez, pvalueCutoff=0.05)
+
+# GSEA
+GSEA(geneList_mapped, TERM2GENE=my_genesets, pvalueCutoff=0.05)
+</code></pre>
+</section>
+
+<section>
+<h2>Reporting Functional Analysis Results</h2>
+<p>Include in your paper/supplement:</p>
+<ul>
+<li>Database versions (GO release date, KEGG release, MSigDB version)</li>
+<li>Background gene set definition (all tested genes? all expressed genes?)</li>
+<li>Multiple testing correction method (BH FDR)</li>
+<li>Significance threshold (typically padj/qvalue < 0.05)</li>
+<li>For GSEA: ranking metric, number of permutations</li>
+<li>Redundancy handling (simplify cutoff if used)</li>
+<li>Top 10–20 terms with gene ratio, p-value, key genes</li>
+</ul>
+</section>
+
+<section>
+<h2>Common Pitfalls</h2>
+<ol>
+<li><strong>Using gene symbols instead of Entrez IDs:</strong> clusterProfiler requires Entrez IDs. Always convert with <code>bitr()</code>.</li>
+<li><strong>Wrong background set:</strong> Use all genes that passed pre-filtering, not all genes in the genome.</li>
+<li><strong>Ignoring redundancy:</strong> Reporting 50 GO terms where 40 are parent/child inflates apparent significance.</li>
+<li><strong>Threshold hacking in ORA:</strong> Changing padj cutoff to get "better" results. Pre-register or justify threshold.</li>
+<li><strong>Running GSEA on a pre-filtered list:</strong> GSEA needs <em>all</em> genes ranked. Do not pre-filter by significance.</li>
+<li><strong>Using outdated annotations:</strong> Update <code>org.Hs.eg.db</code> and MSigDB regularly.</li>
+<li><strong>Overinterpreting generic terms:</strong> "Cellular process", "Metabolic process" are often significant but uninformative. Filter by term specificity (term size 10–500 genes).</li>
+<li><strong>Not validating key findings:</strong> Enrichment is hypothesis-generating. Validate top pathways with qPCR, Western blot, or functional assays.</li>
+</ol>
+</section>
+
+<section>
+<h2>Functional Analysis Checklist</h2>
+<ul>
+<li>[ ] DESeq2 results object with gene symbols and Entrez IDs available</li>
+<li>[ ] Background gene set defined (all tested genes after pre-filtering)</li>
+<li>[ ] Gene symbols converted to Entrez IDs for all genes</li>
+<li>[ ] ORA run for GO (BP, MF, CC) with clusterProfiler::enrichGO</li>
+<li>[ ] ORA run for KEGG/Reactome/MSigDB Hallmark</li>
+<li>[ ] Redundancy reduction applied (simplify or emapplot clustering)</li>
+<li>[ ] GSEA run on full ranked list (Wald statistic or signed -log10(p))</li>
+<li>[ ] GSEA run for GO, KEGG, MSigDB Hallmark</li>
+<li>[ ] Leading-edge genes extracted for top GSEA terms</li>
+<li>[ ] Key visualizations generated: dotplot, enrichment map, GSEA curves</li>
+<li>[ ] Results tables saved with term ID, description, gene ratio, p.adjust, leading genes</li>
+<li>[ ] Custom gene sets tested (if applicable)</li>
+<li>[ ] Database versions and parameters documented for methods section</li>
+</ul>
+</section>
+</main>
+<footer>
+<p>Built for the RNA-seq Data Analysis workshop. <a href="https://github.com/chaoqh/chaoqh_llm">Repository</a></p>
+</footer>
+</body>
+</html>

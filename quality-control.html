@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quality Control — RNA-seq Data Analysis</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+<h1>RNA-seq Data Analysis</h1>
+<p class="subtitle">A hands-on introduction for graduate students in genomics</p>
+</header>
+<nav>
+<ul>
+<li><a href="index.html">Overview</a></li>
+<li><a href="experimental-design.html">Experimental Design</a></li>
+<li><a href="quality-control.html" class="active">Quality Control</a></li>
+<li><a href="alignment-quantification.html">Alignment &amp; Quantification</a></li>
+<li><a href="differential-expression.html">Differential Expression</a></li>
+<li><a href="functional-analysis.html">Functional Analysis</a></li>
+</ul>
+</nav>
+<main>
+<section>
+<h2>Quality Control: Know Your Data Before You Analyze It</h2>
+<p>Raw sequencing reads contain artifacts — adapter sequences, low-quality tails, PCR duplicates, contamination — that distort downstream analysis. Quality control (QC) identifies these problems so you can fix them (trimming) or flag affected samples.</p>
+</section>
+
+<section>
+<h2>FastQC: The Standard QC Tool</h2>
+<p><code>FastQC</code> (Babraham Institute) generates a per-sample HTML report with ~10 diagnostic modules. Run it on every FASTQ file:</p>
+<pre><code>fastqc sample_R1.fastq.gz sample_R2.fastq.gz -o qc_reports/</code></pre>
+<p>For many samples, aggregate with <code>MultiQC</code>:</p>
+<pre><code>multiqc qc_reports/ -o multiqc_report/</code></pre>
+</section>
+
+<section>
+<h2>Key FastQC Modules and What They Mean</h2>
+<table>
+<thead>
+<tr><th>Module</th><th>What It Shows</th><th>Action If Failing</th></tr>
+</thead>
+<tbody>
+<tr><td>Per base sequence quality</td><td>Phred quality score (Q) at each position</td><td>Trim low-quality tails (typically last 10–15 bp); Q < 20 = 1% error rate</td></tr>
+<tr><td>Per sequence quality scores</td><td>Distribution of mean quality per read</td><td>If a subpopulation of low-quality reads exists, consider aggressive trimming</td></tr>
+<tr><td>Per base sequence content</td><td>Fraction of A/C/G/T at each position</td><td>Random libraries should be flat (~25% each). Bias at start = adapter or priming artifact</td></tr>
+<tr><td>Per sequence GC content</td><td>GC% distribution across reads</td><td>Should match expected genome GC%. A second peak = contamination (e.g., adapter, rRNA, bacteria)</td></tr>
+<tr><td>Per base N content</td><td>Fraction of N (unknown) bases at each position</td><td>Rising N% at ends = quality degradation; trim</td></tr>
+<tr><td>Sequence length distribution</td><td>Read length(s) present</td><td>Should be uniform. Multiple peaks = adapter dimers or trimming artifacts</td></tr>
+<tr><td>Sequence duplication levels</td><td>Fraction of reads seen >1 time</td><td>High duplication in RNA-seq is often biological (highly expressed genes). Check if duplication drops after removing rRNA/mtRNA</td></tr>
+<tr><td>Overrepresented sequences</td><td>Exact sequences appearing frequently</td><td>Adapters, primers, rRNA, poly-A. Trim if adapter; note if rRNA depletion failed</td></tr>
+<tr><td>Adapter content</td><td>% reads with adapter at each position</td><td>> 5% adapter content = trim required. Illumina TruSeq, Nextera, or custom adapters</td></tr>
+<tr><td>Kmer content</td><td>Overrepresented short kmers</td><td>Can reveal adapter fragments, priming bias, or contamination</td></tr>
+</tbody>
+</table>
+</section>
+
+<section>
+<h2>RNA-seq Specific QC Considerations</h2>
+<div class="concepts">
+<div class="concept">
+<h3>Per-base sequence content is rarely flat</h3>
+<p>Unlike genomic DNA-seq, RNA-seq shows strong 5′ bias from random hexamer priming and 3′ bias from poly-A selection or degradation. This is <em>expected</em>, not a failure.</p>
+</div>
+<div class="concept">
+<h3>Duplication is often biological</h3>
+<p>In RNA-seq, highly expressed genes (e.g., ribosomal proteins, hemoglobin) produce many identical reads. This is not a PCR artifact. Use <code>Preseq</code> or <code>samtools markdup</code> on aligned reads to distinguish.</p>
+</div>
+<div class="concept">
+<h3>rRNA contamination</h3>
+<p>Even with poly-A selection or rRNA depletion, 5–50% of reads can be rRNA. Check "Overrepresented sequences" for rRNA hits. If > 20% rRNA, consider re-depleting or using a depletion kit.</p>
+</div>
+<div class="concept">
+<h3>Strand-specificity check</h3>
+<p>For stranded libraries, verify the expected strand bias after alignment (e.g., with <code>RSeQC infer_experiment.py</code>). Wrong strandedness setting in quantification = wasted data.</p>
+</div>
+</div>
+</section>
+
+<section>
+<h2>Trimming: Removing Adapters and Low-Quality Bases</h2>
+<p>Trim every dataset. Even if FastQC shows minimal adapter content, trimmers remove low-quality tails that hurt alignment.</p>
+<h3>Recommended tools</h3>
+<ul>
+<li><strong>fastp</strong> (recommended): Fast, auto-detects adapters, produces HTML/JSON report, does QC + trimming in one step</li>
+<li><strong>Trimmomatic</strong>: Classic, highly configurable, Java-based</li>
+<li><strong>cutadapt</strong>: Flexible, Python, good for custom adapters</li>
+</ul>
+<h3>Example: fastp</h3>
+<pre><code>fastp -i sample_R1.fastq.gz -I sample_R2.fastq.gz \
+      -o sample_R1.trimmed.fastq.gz -O sample_R2.trimmed.fastq.gz \
+      --detect_adapter_for_pe --trim_poly_g --trim_poly_x \
+      --qualified_quality_phred 20 --length_required 30 \
+      --html qc/fastp_sample.html --json qc/fastp_sample.json</code></pre>
+<p>Key options: <code>--detect_adapter_for_pe</code> auto-detects Illumina adapters; <code>--trim_poly_g</code> removes poly-G tails (common on NovaSeq); <code>--trim_poly_x</code> removes poly-X tails; <code>--qualified_quality_phred 20</code> keeps bases with Q ≥ 20; <code>--length_required 30</code> discards reads shorter than 30 bp after trimming.</p>
+</section>
+
+<section>
+<h2>Post-Trimming QC</h2>
+<p>Always re-run FastQC (or check fastp's HTML report) after trimming. Verify:</p>
+<ul>
+<li>Adapter content ~0%</li>
+<li>Per-base quality flat and high across read length</li>
+<li>No severe length distribution shift (median length should be close to original)</li>
+<li>Per-base sequence content still shows expected RNA-seq bias (not flat)</li>
+</ul>
+</section>
+
+<section>
+<h2>Additional QC Tools for RNA-seq</h2>
+<table>
+<thead>
+<tr><th>Tool</th><th>Purpose</th><th>When to Use</th></tr>
+</thead>
+<tbody>
+<tr><td>MultiQC</td><td>Aggregate FastQC/fastp/alignment reports</td><td>Always — essential for > 5 samples</td></tr>
+<tr><td>RSeQC</td><td>Post-alignment QC: gene body coverage, strand specificity, junction saturation, read distribution</td><td>After alignment, before quantification</td></tr>
+<tr><td>QualiMap</td><td>Alignment QC: coverage, insert size, mapping quality</td><td>After alignment</td></tr>
+<tr><td>Preseq</td><td>Estimate library complexity, predict duplication at deeper sequencing</td><td>Before committing to deeper sequencing</td></tr>
+<tr><td>RNA-SeQC</td><td>Comprehensive RNA-seq metrics (broad institute)</td><td>Publication-ready QC reports</td></tr>
+</tbody>
+</table>
+</section>
+
+<section>
+<h2>RSeQC: Post-Alignment Quality Metrics</h2>
+<p>Run after alignment (e.g., with STAR) but before quantification:</p>
+<pre><code># Gene body coverage (3' bias detection)
+geneBody_coverage.py -r ref.bed -i aligned.bam -o qc/geneBody
+
+# Strand specificity check
+infer_experiment.py -r ref.bed -i aligned.bam
+
+# Read distribution (exon/intron/intergenic)
+read_distribution.py -r ref.bed -i aligned.bam
+
+# Junction saturation (for splicing analysis)
+junction_saturation.py -r ref.bed -i aligned.bam</code></pre>
+<h3>Interpreting gene body coverage</h3>
+<ul>
+<li>Flat line from 5′ to 3′ = uniform coverage (ideal)</li>
+<li>Strong 3′ bias = RNA degradation or 3′-tag protocol (QuantSeq)</li>
+<li>5′ bias = possible template switching artifact</li>
+</ul>
+</section>
+
+<section>
+<h2>Sample-Level QC: Flagging Outliers</h2>
+<p>After QC and alignment, check these per-sample metrics. Flag samples that are extreme outliers (> 2 SD from mean or clear visual outliers in MultiQC):</p>
+<table>
+<thead>
+<tr><th>Metric</th><th>Typical Range (Mammalian, 30M PE)</th><th>Concern If</th></tr>
+</thead>
+<tbody>
+<tr><td>Total raw reads</td><td>25–35 million pairs</td><td>< 15M or > 50M (unexpected)</td></tr>
+<tr><td>Mapping rate</td><td>80–95%</td><td>< 70% (contamination, wrong genome, poor quality)</td></tr>
+<tr><td>Uniquely mapped</td><td>70–90%</td><td>< 60%</td></tr>
+<tr><td>rRNA fraction</td><td>< 10% (poly-A), < 30% (rRNA-depleted)</td><td>> 50%</td></tr>
+<tr><td>Duplicate rate (post-alignment)</td><td>20–50%</td><td>> 80% (possible PCR over-amplification)</td></tr>
+<tr><td>Median insert size</td><td>150–300 bp</td><td>Very small (< 50 bp) = adapter dimers</td></tr>
+<tr><td>Genes detected (> 1 count)</td><td>12,000–18,000</td><td>< 8,000 (low complexity or degraded)</td></tr>
+</tbody>
+</table>
+<p><strong>Do not automatically discard outliers.</strong> Investigate: check metadata, re-examine FastQC, consider biological explanation. Document your decision.</p>
+</section>
+
+<section>
+<h2>QC Checklist</h2>
+<ul>
+<li>[ ] FastQC run on all raw FASTQ files</li>
+<li>[ ] MultiQC report generated and reviewed</li>
+<li>[ ] Adapter content assessed; trimming performed if > 5%</li>
+<li>[ ] fastp (or Trimmomatic/cutadapt) run on all samples</li>
+<li>[ ] Post-trimming FastQC/fastp report reviewed</li>
+<li>[ ] Reads aligned to reference genome</li>
+<li>[ ] RSeQC run: gene body coverage, strand check, read distribution</li>
+<li>[ ] Per-sample alignment metrics collected (mapping rate, duplication, genes detected)</li>
+<li>[ ] Outlier samples identified, investigated, and decision documented</li>
+<li>[ ] QC summary table created for methods section</li>
+</ul>
+</section>
+</main>
+<footer>
+<p>Built for the RNA-seq Data Analysis workshop. <a href="https://github.com/chaoqh/chaoqh_llm">Repository</a></p>
+</footer>
+</body>
+</html>
